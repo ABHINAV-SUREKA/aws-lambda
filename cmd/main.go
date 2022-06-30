@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"github.com/ABHINAV-SUREKA/aws-lambda/constants"
 	"github.com/ABHINAV-SUREKA/aws-lambda/internal/app"
 	"github.com/aws/aws-lambda-go/events"
@@ -16,13 +15,13 @@ func init() {
 	})
 }
 
-func HandleLambdaEvent(ctx context.Context, event events.SNSEvent) {
-	config := app.New(ctx, event)
+func HandleLambdaEvent(event events.SNSEvent) {
+	config := app.New(event)
 	notifyChan := make(chan struct{}, 1)
 
 	payloadByteArr, err := config.FormatEventMessage()
 	if err != nil {
-		log.Errorf("Failed to format event: %s", err)
+		log.Errorf("Failed to format event message: %s", err)
 	} else {
 		go func() {
 			httpReq := app.HttpRequest{

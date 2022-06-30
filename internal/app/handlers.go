@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,19 +74,24 @@ func (config *config) SendNotification(httpReq HttpRequest, notifyChan chan stru
 		if err := func() error {
 			req, err := http.NewRequest(httpReq.Method, httpReq.URL, bytes.NewBuffer(httpReq.Body))
 			if err != nil {
-				return errors.New(fmt.Sprintf("Error notifying Slack: %s. Retrying...", err))
+				return errors.New(fmt.Sprintf("Error sending notification to %s: %s. Retrying...", httpReq.URL, err))
 			}
 			for key, val := range httpReq.Headers {
 				req.Header.Add(key, val)
 			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), constants.RequestTimeout*time.Second)
+			defer cancel()
+			req = req.WithContext(ctx)
+
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
-				return errors.New(fmt.Sprintf("Error sending notification: %s. Retrying...", err))
+				return errors.New(fmt.Sprintf("Error sending notification to %s: %s. Retrying...", httpReq.URL, err))
 			}
 			defer resp.Body.Close()
 			if statusOK := resp.StatusCode >= 200 && resp.StatusCode < 300; !statusOK {
-				return errors.New(fmt.Sprintf("Error sending notification: non-OK HTTP status: %v. Retrying...", resp.StatusCode))
+				return errors.New(fmt.Sprintf("Error sending notification to %s: non-OK HTTP status: %v. Retrying...", httpReq.URL, resp.StatusCode))
 			}
 			return nil
 		}(); err != nil {
@@ -96,9 +102,9 @@ func (config *config) SendNotification(httpReq HttpRequest, notifyChan chan stru
 		break
 	}
 	if i == constants.RequestRetries {
-		log.Error("Failed to send notification: request retries exhausted")
+		log.Errorf("Failed to send notification to %s: request retries exhausted", httpReq.URL)
 	} else {
-		log.Info("Successfully sent notification")
+		log.Infof("Successfully sent notification to %s", httpReq.URL)
 	}
 	notifyChan <- struct{}{}
 }
