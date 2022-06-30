@@ -1,21 +1,16 @@
 package app
 
-import (
-	"context"
-	"github.com/aws/aws-lambda-go/events"
-)
-
 type Config interface {
-	Handler() (string, error)
-	SendNotification([]byte, chan struct{}) (string, error)
+	FormatEventMessage() ([]byte, error)
+	SendNotification(HttpRequest, chan struct{})
 }
 
 type config struct {
-	ctx   context.Context
-	event events.SNSEvent
+	ctx   interface{}
+	event interface{}
 }
 
-func New(ctx context.Context, event events.SNSEvent) Config {
+func New(ctx interface{}, event interface{}) Config {
 	return &config{
 		ctx:   ctx,
 		event: event,
