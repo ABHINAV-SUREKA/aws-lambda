@@ -9,10 +9,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	config app.Config
-)
-
 func init() {
 	log.SetFormatter(&log.TextFormatter{
 		TimestampFormat: "02-01-2006 15:04:05",
@@ -21,15 +17,16 @@ func init() {
 }
 
 func HandleLambdaEvent(ctx context.Context, event events.SNSEvent) {
-	config = app.New(ctx, event)
+	config := app.New(ctx, event)
 	notifyChan := make(chan struct{}, 1)
+
 	payloadByteArr, err := config.FormatEventMessage()
 	if err != nil {
 		log.Errorf("Failed to format event: %s", err)
 	} else {
 		go func() {
 			httpReq := app.HttpRequest{
-				Url: constants.SlackURL,
+				URL: constants.SlackURL,
 				Headers: map[string]string{
 					"Content-Type": "application/json",
 				},
@@ -41,7 +38,7 @@ func HandleLambdaEvent(ctx context.Context, event events.SNSEvent) {
 
 		go func() {
 			httpReq := app.HttpRequest{
-				Url: constants.PagerDutyURL,
+				URL: constants.PagerDutyURL,
 				Headers: map[string]string{
 					"Content-Type": "application/json",
 				},

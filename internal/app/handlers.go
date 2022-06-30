@@ -20,7 +20,7 @@ type payload struct {
 type Message map[string]interface{}
 
 type HttpRequest struct {
-	Url     string
+	URL     string
 	Headers map[string]string
 	Method  string
 	Body    []byte
@@ -71,7 +71,7 @@ func (config *config) SendNotification(httpReq HttpRequest, notifyChan chan stru
 	i := 0
 	for ; i < constants.RequestRetries; i++ {
 		if err := func() error {
-			req, err := http.NewRequest(httpReq.Method, httpReq.Url, bytes.NewBuffer(httpReq.Body))
+			req, err := http.NewRequest(httpReq.Method, httpReq.URL, bytes.NewBuffer(httpReq.Body))
 			if err != nil {
 				return errors.New(fmt.Sprintf("Error notifying Slack: %s. Retrying...", err))
 			}
