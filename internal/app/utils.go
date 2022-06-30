@@ -30,6 +30,12 @@ func formatEvent(event events.SNSEvent) payload {
 				}
 			}
 		}
+
+		if strings.Index(event.Records[0].SNS.Subject, "[RESOLVED]") != -1 {
+			message["event_action"] = "resolve"
+		} else {
+			message["event_action"] = "trigger"
+		}
 	}
 
 	return payload{
