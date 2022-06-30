@@ -11,11 +11,20 @@ type payload struct {
 type Message map[string]interface{}
 
 func (config *config) Handler() (string, error) {
+	alertChan := make(chan int, 1)
+
 	payload := formatEvent(config.event)
-	eventJSON, err := json.MarshalIndent(payload, "", "  ")
+	payloadByteArr, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return "", err
 	}
 
-	return string(eventJSON), nil
+	go notifySlack(payloadByteArr, alertChan)
+	go notifyPagerDuty(payloadByteArr, alertChan)
+
+	for i := 0; i < 2; i++ {
+		<-alertChan
+	}
+
+	return string(payloadByteArr), nil
 }
