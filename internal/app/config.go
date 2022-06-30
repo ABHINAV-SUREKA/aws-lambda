@@ -7,6 +7,7 @@ import (
 
 type Config interface {
 	Handler() (string, error)
+	SendNotification([]byte, chan struct{}) (string, error)
 }
 
 type config struct {
