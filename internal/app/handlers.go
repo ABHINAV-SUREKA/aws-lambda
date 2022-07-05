@@ -15,7 +15,7 @@ import (
 )
 
 type payload struct {
-	Payload Message `json:"payload"`
+	Text Message `json:"text"`
 }
 
 type Message map[string]interface{}
@@ -34,9 +34,13 @@ func (config *config) FormatEventMessage() ([]byte, error) {
 		eventMsg := config.event.(events.SNSEvent).Records[0].SNS.Message
 		eventMsgItems := strings.Split(eventMsg, "\n")
 		for _, eventMsgItem := range eventMsgItems {
+			if !strings.Contains(eventMsgItem, ":") {
+				continue
+			}
 			item := strings.Split(eventMsgItem, ":")
 			key := strings.TrimSpace(item[0])
 			val := strings.TrimSpace(item[1])
+			log.Infof("%s:%v", key, val)
 			switch {
 			case strings.Contains(strings.ToLower(key), "client_url"),
 				strings.Contains(strings.ToLower(key), "severity"),
@@ -60,7 +64,9 @@ func (config *config) FormatEventMessage() ([]byte, error) {
 		}
 	}
 
-	payloadByteArr, err := json.MarshalIndent(payload{Payload: message}, "", "  ")
+	message["source"] = "amp-alerting"
+
+	payloadByteArr, err := json.MarshalIndent(payload{Text: message}, "", "  ")
 	if err != nil {
 		return []byte{}, err
 	}
@@ -70,6 +76,7 @@ func (config *config) FormatEventMessage() ([]byte, error) {
 
 func (config *config) SendNotification(httpReq HttpRequest, notifyChan chan struct{}) {
 	i := 0
+	log.Info("string(httpReq.Body): ", string(httpReq.Body))
 	for ; i < constants.RequestRetries; i++ {
 		if err := func() error {
 			req, err := http.NewRequest(httpReq.Method, httpReq.URL, bytes.NewBuffer(httpReq.Body))
@@ -94,6 +101,7 @@ func (config *config) SendNotification(httpReq HttpRequest, notifyChan chan stru
 				return errors.New(fmt.Sprintf("Error sending notification to %s: non-OK HTTP status: %v. Retrying...", httpReq.URL, resp.StatusCode))
 			}
 			return nil
+
 		}(); err != nil {
 			log.Error(err)
 			time.Sleep(constants.RequestSleep * time.Second)
