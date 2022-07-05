@@ -1,8 +1,6 @@
 package main
 
 import (
-	"github.com/ABHINAV-SUREKA/aws-lambda/constants"
-	"github.com/ABHINAV-SUREKA/aws-lambda/internal/app"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	log "github.com/sirupsen/logrus"
@@ -16,41 +14,7 @@ func init() {
 }
 
 func HandleLambdaEvent(event events.SNSEvent) {
-	config := app.New(event)
-	notifyChan := make(chan struct{}, 1)
-
-	payloadByteArr, err := config.FormatEventMessage()
-	if err != nil {
-		log.Errorf("Failed to format event message: %s", err)
-	} else {
-		go func() {
-			httpReq := app.HttpRequest{
-				URL: constants.SlackURL,
-				Headers: map[string]string{
-					"Content-Type": "application/json",
-				},
-				Method: "POST",
-				Body:   payloadByteArr,
-			}
-			config.SendNotification(httpReq, notifyChan)
-		}()
-
-		go func() {
-			httpReq := app.HttpRequest{
-				URL: constants.PagerDutyURL,
-				Headers: map[string]string{
-					"Content-Type": "application/json",
-				},
-				Method: "POST",
-				Body:   payloadByteArr,
-			}
-			config.SendNotification(httpReq, notifyChan)
-		}()
-
-		for i := 0; i < 2; i++ {
-			<-notifyChan
-		}
-	}
+	formatEventMessage(event)
 }
 
 func main() {
