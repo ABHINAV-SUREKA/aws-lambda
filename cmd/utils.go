@@ -9,25 +9,16 @@ import (
 	"github.com/ABHINAV-SUREKA/aws-lambda/constants"
 	"github.com/aws/aws-lambda-go/events"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 )
 
-type keyVal map[string]interface{}
-
-type payload struct {
-	keyVal
-}
-
-type pdPayload struct {
-	Payload payload `json:"payload"`
-	keyVal
-}
-
 type HttpRequest struct {
 	URL     string
-	Headers map[string]string
+	Headers map[string]interface{}
 	Method  string
 	Body    []byte
 }
@@ -36,84 +27,103 @@ func formatEventMessage(event events.SNSEvent) {
 
 	httpReq, err := func() (*HttpRequest, error) {
 		httpReq := HttpRequest{}
+		headers := make(map[string]interface{})
 
 		if len(event.Records) > 0 {
 			eventMsg := event.Records[0].SNS.Message
 			eventSub := event.Records[0].SNS.Subject
+			log.Info(eventMsg)
+			log.Info(eventSub)
+
+			data := make(map[string]interface{})
+			err := yaml.Unmarshal([]byte(eventMsg), &data)
+			if err != nil {
+				return nil, err
+			}
 
 			if strings.Contains(strings.ToLower(eventMsg), "routing_key") {
-				// format event message for pager duty
-				payload := payload{}
-				keyVal := keyVal{}
+				/* Format event message for PagerDuty
+				 */
+				payload := make(map[string]interface{})
 
-				eventMsgItems := strings.Split(eventMsg, "\n")
-				for _, eventMsgItem := range eventMsgItems {
-					if !strings.Contains(eventMsgItem, ":") {
-						continue
-					}
-					item := strings.Split(eventMsgItem, ":")
-					key := strings.TrimSpace(item[0])
-					val := strings.TrimSpace(item[1])
+				for key, val := range data {
 					log.Infof("%s:%v", key, val)
-
 					switch {
-					case strings.Contains(strings.ToLower(key), "client_url"),
-						strings.Contains(strings.ToLower(key), "links"):
-						if val != "" {
-							keyVal[key] = val
-						}
+					case strings.Contains(strings.ToLower(key), "client_url"):
+						payload["source"] = val
 					case strings.Contains(strings.ToLower(key), "severity"):
-						payload.keyVal[key] = val
+						payload[key] = val
+						delete(data, "severity")
 					case strings.Contains(strings.ToLower(key), "description"):
-						payload.keyVal["summary"] = val
+						payload["summary"] = val
+						delete(data, "description")
 					case strings.Contains(strings.ToLower(key), "details"):
-						if val != "" {
-							payload.keyVal["custom_details"] = val
+						details := ""
+						for k, v := range val.(map[string]interface{}) {
+							details = details + fmt.Sprintf("%s: %v\n", k, v)
 						}
+						payload["custom_details"] = details
+						delete(data, "details")
 					case strings.Contains(strings.ToLower(key), "routing_key"):
-						httpReq.Headers["x-routing-key"] = val
+						headers["x-routing-key"] = val
+						delete(data, "routing_key")
 					}
 				}
 
 				if strings.Contains(strings.ToLower(eventSub), "resolve") {
-					keyVal["event_action"] = "resolve"
+					data["event_action"] = "resolve"
 				} else {
-					keyVal["event_action"] = "trigger"
+					data["event_action"] = "trigger"
 				}
 
-				bodyByteArr, err := json.MarshalIndent(pdPayload{Payload: payload, keyVal: keyVal}, "", "  ")
+				data["payload"] = payload
+
+				byteArr, err := json.MarshalIndent(data, "", "  ")
 				if err != nil {
 					return nil, err
 				}
 
-				httpReq.Body = bodyByteArr
+				httpReq.Body = byteArr
 				httpReq.URL = constants.PagerDutyURL
 				httpReq.Method = "POST"
-				httpReq.Headers["Content-Type"] = "application/json"
+				headers["Content-Type"] = "application/json"
+				httpReq.Headers = headers
 				return &httpReq, nil
-
-			} else if strings.Contains(strings.ToLower(eventMsg), "channel") {
-				// format event message for slack
-				return nil, nil
 			}
+
+			/* Format event message for Slack
+			 */
+			byteArr, err := json.MarshalIndent(data, "", "  ")
+			if err != nil {
+				return nil, err
+			}
+
+			httpReq.Body = byteArr
+			httpReq.URL = constants.SlackURL
+			httpReq.Method = "POST"
+			headers["Content-Type"] = "application/json"
+			httpReq.Headers = headers
+			return &httpReq, nil
 		}
-		return nil, nil
+
+		return nil, errors.New("no SNS event records found")
 	}()
 
 	if err != nil {
-		log.Error(err)
+		log.Errorf("Error formatting SNS event message: %s", err)
+	} else {
+		sendNotification(*httpReq)
 	}
-
-	sendNotification(*httpReq)
 }
 
 func sendNotification(httpReq HttpRequest) {
 	var (
-		i      = 0
-		err    error
-		req    *http.Request
-		resp   *http.Response
-		client = &http.Client{}
+		i       = 0
+		err     error
+		req     *http.Request
+		resp    *http.Response
+		client  = &http.Client{}
+		byteArr []byte
 	)
 	log.Info("string(httpReq.Body): ", string(httpReq.Body))
 
@@ -124,7 +134,7 @@ func sendNotification(httpReq HttpRequest) {
 				return errors.New(fmt.Sprintf("Error sending notification to %s: %s. Retrying...", httpReq.URL, err))
 			}
 			for key, val := range httpReq.Headers {
-				req.Header.Add(key, val)
+				req.Header.Add(key, val.(string))
 			}
 
 			ctx, cancel := context.WithTimeout(req.Context(), constants.RequestTimeout*time.Second)
@@ -135,10 +145,14 @@ func sendNotification(httpReq HttpRequest) {
 			if err != nil {
 				return errors.New(fmt.Sprintf("Error sending notification to %s: %s. Retrying...", httpReq.URL, err))
 			}
-
 			defer resp.Body.Close()
+
+			byteArr, err = io.ReadAll(resp.Body)
+			if err != nil {
+				return errors.New(fmt.Sprintf("Error reading response: %v. Retrying...", err))
+			}
 			if statusOK := resp.StatusCode >= 200 && resp.StatusCode < 300; !statusOK {
-				return errors.New(fmt.Sprintf("Error sending notification to %s: non-OK HTTP status: %v. Retrying...", httpReq.URL, resp.StatusCode))
+				return errors.New(fmt.Sprintf("Error sending notification to %s: non-OK HTTP status: %v. Error: %v. Retrying...", httpReq.URL, string(byteArr), resp.StatusCode))
 			}
 
 			return nil
